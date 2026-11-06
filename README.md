@@ -1,29 +1,33 @@
 # Driving Test Preparation App
 
-A web-based interactive application designed to help users prepare for and test their knowledge of driving rules, regulations, and road signs.
+A bilingual (English / اردو) web app to prepare for the driving license computer test and practical test.
+
+**Live:** https://zyanshykh.github.io/driving-test/
 
 ## Features
-* **Interactive Quizzes:** Test your understanding of traffic rules and road signs.
-* **Instant Feedback:** See correct answers and explanations immediately.
-* **Responsive Design:** Optimized for seamless usage across different screen sizes.
+- **Quiz:** 36 questions on road signs, rules, safety and situations, with an explanation after every answer
+- **Weak questions:** wrong answers are saved so you can practise them again
+- **Practical checklist** and an 11-day study plan
+- **English and Urdu** (right-to-left), **dark and light theme**
+- Fully responsive, works well on phones
+- Progress is saved in your browser
 
 ## Tech Stack
-* **HTML5 & CSS3:** For structure and styling.
-* **TypeScript / JavaScript:** For interactive application logic.
+- HTML5 and CSS3
+- TypeScript compiled to JavaScript
 
-## Getting Started
-
-To run this project locally, follow these steps:
-
-1. Clone the repository:
-   ```bash
-   git clone [https://github.com/zyanshykh/driving-test.git](https://github.com/zyanshykh/driving-test.git)
-
-   Navigate to the project directory:
-
-```Bash
+## Run locally
+```bash
+git clone https://github.com/zyanshykh/driving-test.git
 cd driving-test
-Open index.html in your browser or run it using a live server in VS Code.
+```
+Open `index.html` in your browser.
 
- Author
+To change the code, edit the files in `src/` and run:
+```bash
+npm install
+npx tsc
+```
+
+## Author
 Muhammad Zayyan Sheikh
