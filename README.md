@@ -25,5 +25,5 @@ To run this project locally, follow these steps:
 cd driving-test
 Open index.html in your browser or run it using a live server in VS Code.
 
-## Author
+ Author
 Muhammad Zayyan Sheikh
