@@ -1,57 +1,97 @@
 // ---------- Config ----------
 const TEST_DATE = new Date("2026-11-17T00:00:00+05:00");
-const STORE_KEY = "driving-prep-v1";
+const STORE_KEY = "driving-prep-v2";
+const LANG_KEY = "driving-prep-lang";
+const THEME_KEY = "driving-prep-theme";
 
 interface Store {
   attempts: number;
   correct: number;
-  wrong: string[]; // question ids answered wrong last time
-  best: number; // best quiz % (0-100)
+  wrong: string[];
+  best: number;
   checks: Record<string, boolean>;
   planDone: Record<string, boolean>;
 }
-
 const defaultStore = (): Store => ({ attempts: 0, correct: 0, wrong: [], best: 0, checks: {}, planDone: {} });
 
+function lsGet(k: string): string | null { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k: string, v: string): void { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
+
 function load(): Store {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    return raw ? { ...defaultStore(), ...JSON.parse(raw) } : defaultStore();
-  } catch {
-    return defaultStore();
-  }
+  try { const raw = lsGet(STORE_KEY); return raw ? { ...defaultStore(), ...JSON.parse(raw) } : defaultStore(); }
+  catch { return defaultStore(); }
 }
 let store: Store = load();
-function save(): void {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch { /* private mode */ }
+const save = (): void => lsSet(STORE_KEY, JSON.stringify(store));
+
+// ---------- Language ----------
+let lang = 0; // 0 = English, 1 = Urdu
+const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+
+function tx(key: string, vars: Record<string, string | number> = {}): string {
+  let s = UI[key][lang];
+  for (const k of Object.keys(vars)) s = s.split(`{${k}}`).join(String(vars[k]));
+  return s;
+}
+function fmt(n: number): string {
+  return lang === 1 ? n.toLocaleString("ur-PK", { useGrouping: false }) : String(n);
+}
+const pct = (n: number): string => (lang === 1 ? `${fmt(n)}٪` : `${n}%`);
+const LETTERS: string[][] = [["A", "B", "C", "D"], ["الف", "ب", "ج", "د"]];
+
+function applyLang(): void {
+  const html = document.documentElement;
+  html.lang = lang === 1 ? "ur" : "en";
+  html.dir = lang === 1 ? "rtl" : "ltr";
+  document.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => {
+    el.textContent = UI[el.dataset.i18n as string][lang];
+  });
+  $("theme").setAttribute("aria-label", tx("themeBtn"));
+  document.title = tx("title");
 }
 
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+function toggleLang(): void {
+  lang = lang === 0 ? 1 : 0;
+  lsSet(LANG_KEY, String(lang));
+  applyLang();
+  renderAll();
+}
+
+// ---------- Theme ----------
+function applyTheme(t: string): void { document.documentElement.dataset.theme = t; }
+function toggleTheme(): void {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  lsSet(THEME_KEY, next);
+}
 
 // ---------- Countdown ----------
 function renderCountdown(): void {
-  const ms = TEST_DATE.getTime() - Date.now();
-  const days = Math.ceil(ms / 86_400_000);
-  $("countdown").textContent = days > 0 ? `${days} din baaki` : days === 0 ? "Aaj test hai! Best of luck" : "Test ho chuka";
+  const days = Math.ceil((TEST_DATE.getTime() - Date.now()) / 86_400_000);
+  if (days > 0) { $("cd-num").textContent = fmt(days); $("cd-label").textContent = tx("daysLeft"); }
+  else { $("cd-num").textContent = "✓"; $("cd-label").textContent = days === 0 ? tx("testToday") : tx("testDone"); }
 }
 
 // ---------- Tabs ----------
+let currentTab = "quiz";
 function showTab(name: string): void {
+  currentTab = name;
   document.querySelectorAll<HTMLElement>(".panel").forEach(p => (p.hidden = p.id !== `tab-${name}`));
-  document.querySelectorAll<HTMLButtonElement>("nav button").forEach(b => {
-    b.setAttribute("aria-selected", String(b.dataset.tab === name));
-  });
+  document.querySelectorAll<HTMLButtonElement>(".tabs button").forEach(b =>
+    b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   if (name === "progress") renderProgress();
 }
 
 // ---------- Quiz ----------
-interface RunQ extends Question { shuffled: string[]; correctIdx: number; }
+interface RunQ { q: Question; order: number[]; } // order[pos] = original option index
+type View = "idle" | "question" | "result" | "noweak";
 
+let view: View = "idle";
 let run: RunQ[] = [];
 let pos = 0;
 let score = 0;
-let answered = false;
-let runWrong: string[] = [];
+let picked: number | null = null; // position the user picked
+let runWrong = 0;
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -68,113 +108,110 @@ function startQuiz(): void {
   let pool = QUESTIONS;
   if (cat === "Weak") pool = QUESTIONS.filter(q => store.wrong.includes(q.id));
   else if (cat !== "All") pool = QUESTIONS.filter(q => q.cat === cat);
-  if (pool.length === 0) {
-    $("quiz-area").innerHTML = `<p class="note">Abhi koi weak question nahi hai. Pehle ek quiz do!</p>`;
-    return;
-  }
-  run = shuffle(pool).slice(0, count).map(q => {
-    const correctText = q.options[q.answer];
-    const shuffled = shuffle(q.options);
-    return { ...q, shuffled, correctIdx: shuffled.indexOf(correctText) };
-  });
-  pos = 0; score = 0; runWrong = [];
-  renderQuestion();
+  if (pool.length === 0) { view = "noweak"; renderQuiz(); return; }
+  run = shuffle(pool).slice(0, count).map(q => ({ q, order: shuffle(q.options.map((_, i) => i)) }));
+  pos = 0; score = 0; runWrong = 0; picked = null;
+  view = "question";
+  renderQuiz();
 }
 
-function renderQuestion(): void {
-  const q = run[pos];
-  answered = false;
-  const opts = q.shuffled
-    .map((o, i) => `<button class="opt" data-i="${i}">${o}</button>`)
-    .join("");
-  $("quiz-area").innerHTML = `
-    <div class="meta"><span>Question ${pos + 1} / ${run.length}</span><span class="tag">${q.cat}</span></div>
-    <div class="bar"><div style="width:${(pos / run.length) * 100}%"></div></div>
-    ${q.sign ? `<div class="sign">${q.sign}</div>` : ""}
-    <h2 class="q">${q.q}</h2>
-    <div class="opts">${opts}</div>
-    <div id="why" class="why" hidden></div>
-    <button id="next" class="primary" hidden>${pos === run.length - 1 ? "Result dekho" : "Agla sawal"}</button>`;
-  document.querySelectorAll<HTMLButtonElement>(".opt").forEach(b => b.addEventListener("click", () => pick(Number(b.dataset.i))));
-  $("next").addEventListener("click", () => { pos++; pos < run.length ? renderQuestion() : renderResult(); });
+function renderQuiz(): void {
+  const area = $("quiz-area");
+  if (view === "idle") { area.innerHTML = `<p class="note">${tx("hint")}</p>`; return; }
+  if (view === "noweak") { area.innerHTML = `<p class="note">${tx("noWeak")}</p>`; return; }
+  if (view === "result") { renderResult(); return; }
+
+  const { q, order } = run[pos];
+  const correctPos = order.indexOf(q.answer);
+  const opts = order.map((orig, i) => {
+    let cls = "opt";
+    if (picked !== null) {
+      if (i === correctPos) cls += " right";
+      else if (i === picked) cls += " wrong";
+    }
+    return `<button class="${cls}" data-i="${i}" ${picked !== null ? "disabled" : ""}>
+      <span class="letter">${LETTERS[lang][i]}</span><span>${q.options[orig][lang]}</span></button>`;
+  }).join("");
+
+  const feedback = picked === null ? "" :
+    `<div class="why ${picked === correctPos ? "ok" : "bad"}"><strong>${picked === correctPos ? tx("correct") : tx("incorrect")}</strong> ${q.why[lang]}</div>
+     <button id="next" class="primary block">${pos === run.length - 1 ? tx("seeResult") : tx("next")}</button>`;
+
+  area.innerHTML = `
+    <div class="meta"><span>${tx("question", { a: fmt(pos + 1), b: fmt(run.length) })}</span><span class="tag">${UI[q.cat][lang]}</span></div>
+    <div class="bar"><div style="width:${((pos + (picked !== null ? 1 : 0)) / run.length) * 100}%"></div></div>
+    <div class="qwrap${q.sign ? " has-sign" : ""}">
+      ${q.sign ? `<div class="sign">${q.sign}</div>` : ""}
+      <div><h2 class="q">${q.q[lang]}</h2><div class="opts">${opts}</div></div>
+    </div>
+    ${feedback}`;
+
+  document.querySelectorAll<HTMLButtonElement>(".opt").forEach(b =>
+    b.addEventListener("click", () => pickAnswer(Number(b.dataset.i))));
+  const next = document.getElementById("next");
+  if (next) next.addEventListener("click", () => {
+    picked = null; pos++;
+    if (pos < run.length) renderQuiz(); else { view = "result"; renderQuiz(); }
+  });
 }
 
-function pick(i: number): void {
-  if (answered) return;
-  answered = true;
-  const q = run[pos];
-  const ok = i === q.correctIdx;
-  document.querySelectorAll<HTMLButtonElement>(".opt").forEach((b, idx) => {
-    b.disabled = true;
-    if (idx === q.correctIdx) b.classList.add("right");
-    else if (idx === i) b.classList.add("wrong");
-  });
-  if (ok) { score++; store.wrong = store.wrong.filter(id => id !== q.id); }
-  else { runWrong.push(q.id); if (!store.wrong.includes(q.id)) store.wrong.push(q.id); }
+function pickAnswer(i: number): void {
+  if (picked !== null) return;
+  picked = i;
+  const { q, order } = run[pos];
+  const ok = i === order.indexOf(q.answer);
   store.attempts++;
-  if (ok) store.correct++;
+  if (ok) { score++; store.correct++; store.wrong = store.wrong.filter(id => id !== q.id); }
+  else { runWrong++; if (!store.wrong.includes(q.id)) store.wrong.push(q.id); }
   save();
-  const why = $("why");
-  why.hidden = false;
-  why.innerHTML = `<strong>${ok ? "Sahi!" : "Galat."}</strong> ${q.why}`;
-  $("next").hidden = false;
+  renderQuiz();
 }
 
 function renderResult(): void {
-  const pct = Math.round((score / run.length) * 100);
-  if (pct > store.best) { store.best = pct; save(); }
-  const msg = pct >= 80 ? "Zabardast! Test ke liye tayyar." : pct >= 60 ? "Theek hai, thori aur practice." : "Notes dobara parho aur phir koshish karo.";
+  const p = Math.round((score / run.length) * 100);
+  if (p > store.best) { store.best = p; save(); }
+  const msg = p >= 80 ? tx("msgHigh") : p >= 60 ? tx("msgMid") : tx("msgLow");
   $("quiz-area").innerHTML = `
     <div class="result">
-      <div class="big">${pct}%</div>
-      <p>${score} / ${run.length} sahi. ${msg}</p>
-      ${runWrong.length ? `<p class="note">${runWrong.length} galat sawal "Weak questions" mein save ho gaye.</p>` : ""}
-      <button id="again" class="primary">Dobara quiz</button>
+      <div class="ring" style="--p:${p}"><span>${pct(p)}</span></div>
+      <p class="score">${tx("score", { a: fmt(score), b: fmt(run.length) })}</p>
+      <p>${msg}</p>
+      ${runWrong ? `<p class="note">${tx("weakSaved", { n: fmt(runWrong) })}</p>` : ""}
+      <button id="again" class="primary">${tx("again")}</button>
     </div>`;
   $("again").addEventListener("click", startQuiz);
 }
 
 // ---------- Practical checklist ----------
 function renderPractical(): void {
-  $("practical-area").innerHTML = PRACTICAL.map((g, gi) => `
-    <section class="card">
-      <h3>${g.title}</h3>
+  $("practical-area").innerHTML = PRACTICAL.map((g, gi) => {
+    const done = g.items.filter((_, ii) => store.checks[`${gi}-${ii}`]).length;
+    return `<section class="card">
+      <div class="card-head"><h3>${g.title[lang]}</h3><span class="chip">${fmt(done)}/${fmt(g.items.length)}</span></div>
       ${g.items.map((it, ii) => {
         const key = `${gi}-${ii}`;
-        return `<label class="check"><input type="checkbox" data-key="${key}" ${store.checks[key] ? "checked" : ""}/><span>${it}</span></label>`;
+        return `<label class="check"><input type="checkbox" data-key="${key}" ${store.checks[key] ? "checked" : ""}/><span>${it[lang]}</span></label>`;
       }).join("")}
-    </section>`).join("");
+    </section>`;
+  }).join("");
   document.querySelectorAll<HTMLInputElement>("#practical-area input").forEach(c =>
-    c.addEventListener("change", () => { store.checks[c.dataset.key as string] = c.checked; save(); })
-  );
+    c.addEventListener("change", () => { store.checks[c.dataset.key as string] = c.checked; save(); renderPractical(); }));
 }
 
-// ---------- Day-by-day plan ----------
-const PLAN: { date: string; title: string; task: string }[] = [
-  { date: "2026-11-06", title: "Day 1", task: "Signs quiz (shape + colour rules) + gaari mein cockpit check practice" },
-  { date: "2026-11-07", title: "Day 2", task: "Rules quiz + left side lane discipline practice" },
-  { date: "2026-11-08", title: "Day 3", task: "Safety quiz + moving off / smooth clutch control" },
-  { date: "2026-11-09", title: "Day 4", task: "Situations quiz + roundabout / junction practice" },
-  { date: "2026-11-10", title: "Day 5", task: "Weak questions dobara + reverse parking" },
-  { date: "2026-11-11", title: "Day 6", task: "Full quiz (all) + parallel parking" },
-  { date: "2026-11-12", title: "Day 7", task: "Hill start + emergency stop practice" },
-  { date: "2026-11-13", title: "Day 8", task: "Full quiz, target 80%+ + 3-point turn" },
-  { date: "2026-11-14", title: "Day 9", task: "Weak questions + full mock drive (examiner jaisa)" },
-  { date: "2026-11-15", title: "Day 10", task: "Halka revision + documents ready karo" },
-  { date: "2026-11-16", title: "Day 11", task: "Sirf aram + short quiz. Jaldi so jao" },
-  { date: "2026-11-17", title: "Test Day", task: "Documents, jaldi pohancho, ghabrana nahi" },
-];
-
+// ---------- Plan ----------
 function renderPlan(): void {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" });
-  $("plan-area").innerHTML = PLAN.map(p => `
-    <label class="check plan ${p.date === today ? "today" : ""}">
+  const months = lang === 1 ? "نومبر" : "Nov";
+  $("plan-area").innerHTML = PLAN.map((p, i) => {
+    const title = i === PLAN.length - 1 ? tx("testDay") : tx("day", { n: fmt(i + 1) });
+    const dd = Number(p.date.slice(8));
+    return `<label class="check plan ${p.date === today ? "today" : ""}">
       <input type="checkbox" data-date="${p.date}" ${store.planDone[p.date] ? "checked" : ""}/>
-      <span><strong>${p.title}</strong> <small>${p.date.slice(5)}</small><br/>${p.task}</span>
-    </label>`).join("");
+      <span><strong>${title}</strong> <small>${fmt(dd)} ${months}</small><br/>${p.task[lang]}</span>
+    </label>`;
+  }).join("");
   document.querySelectorAll<HTMLInputElement>("#plan-area input").forEach(c =>
-    c.addEventListener("change", () => { store.planDone[c.dataset.date as string] = c.checked; save(); })
-  );
+    c.addEventListener("change", () => { store.planDone[c.dataset.date as string] = c.checked; save(); }));
 }
 
 // ---------- Progress ----------
@@ -182,30 +219,42 @@ function renderProgress(): void {
   const acc = store.attempts ? Math.round((store.correct / store.attempts) * 100) : 0;
   const items = Object.values(store.checks).filter(Boolean).length;
   const total = PRACTICAL.reduce((n, g) => n + g.items.length, 0);
+  const stat = (v: string, k: string): string => `<div class="stat"><b>${v}</b><span>${tx(k)}</span></div>`;
   $("progress-area").innerHTML = `
     <div class="stats">
-      <div class="stat"><b>${store.attempts}</b><span>Sawal solve</span></div>
-      <div class="stat"><b>${acc}%</b><span>Accuracy</span></div>
-      <div class="stat"><b>${store.best}%</b><span>Best quiz</span></div>
-      <div class="stat"><b>${items}/${total}</b><span>Practical checklist</span></div>
-      <div class="stat"><b>${store.wrong.length}</b><span>Weak questions</span></div>
+      ${stat(fmt(store.attempts), "solved")}
+      ${stat(pct(acc), "accuracy")}
+      ${stat(pct(store.best), "best")}
+      ${stat(`${fmt(items)}/${fmt(total)}`, "checklist")}
+      ${stat(fmt(store.wrong.length), "weakCount")}
     </div>
-    <button id="reset" class="ghost">Progress reset karo</button>`;
+    <button id="reset" class="ghost">${tx("reset")}</button>`;
   $("reset").addEventListener("click", () => {
-    if (confirm("Sara progress delete ho jayega. Pakka?")) {
-      store = defaultStore(); save(); renderPractical(); renderPlan(); renderProgress();
-    }
+    if (confirm(tx("resetConfirm"))) { store = defaultStore(); save(); view = "idle"; renderAll(); }
   });
 }
 
 // ---------- Init ----------
-function init(): void {
-  document.querySelectorAll<HTMLButtonElement>("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab as string)));
-  $("start").addEventListener("click", startQuiz);
+function renderAll(): void {
   renderCountdown();
-  setInterval(renderCountdown, 60_000);
+  renderQuiz();
   renderPractical();
   renderPlan();
+  if (currentTab === "progress") renderProgress();
+}
+
+function init(): void {
+  lang = lsGet(LANG_KEY) === "1" ? 1 : 0;
+  const saved = lsGet(THEME_KEY);
+  applyTheme(saved ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  document.querySelectorAll<HTMLButtonElement>(".tabs button").forEach(b =>
+    b.addEventListener("click", () => showTab(b.dataset.tab as string)));
+  $("start").addEventListener("click", startQuiz);
+  $("lang").addEventListener("click", toggleLang);
+  $("theme").addEventListener("click", toggleTheme);
+  applyLang();
+  renderAll();
+  setInterval(renderCountdown, 60_000);
   showTab("quiz");
 }
 document.addEventListener("DOMContentLoaded", init);
