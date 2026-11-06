@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Driving Test Prep</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Driving Test Prep</h1>
+      <p class="sub">Computer test + Practical test &middot; 17 Nov 2026 &middot; <strong id="countdown"></strong></p>
+    </div>
+  </header>
+
+  <nav class="wrap" aria-label="Sections">
+    <button data-tab="quiz">Quiz</button>
+    <button data-tab="practical">Practical</button>
+    <button data-tab="plan">Plan</button>
+    <button data-tab="progress">Progress</button>
+  </nav>
+
+  <main class="wrap">
+    <section id="tab-quiz" class="panel">
+      <div class="controls card">
+        <label>Topic
+          <select id="cat">
+            <option value="All">All</option>
+            <option>Signs</option>
+            <option>Rules</option>
+            <option>Safety</option>
+            <option>Situations</option>
+            <option value="Weak">Weak questions</option>
+          </select>
+        </label>
+        <label>Sawal
+          <select id="count">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="40">40</option>
+          </select>
+        </label>
+        <button id="start" class="primary">Start</button>
+      </div>
+      <div id="quiz-area" class="card"><p class="note">Topic choose karo aur Start dabao.</p></div>
+    </section>
+
+    <section id="tab-practical" class="panel" hidden>
+      <p class="note">Har cheez gaari mein actual practice karke tick karo.</p>
+      <div id="practical-area"></div>
+    </section>
+
+    <section id="tab-plan" class="panel" hidden>
+      <p class="note">17 November tak roz ka chhota plan.</p>
+      <div id="plan-area" class="card"></div>
+    </section>
+
+    <section id="tab-progress" class="panel" hidden>
+      <div id="progress-area"></div>
+    </section>
+  </main>
+
+  <footer class="wrap"><small>Ye practice tool hai. Asli test ki exact rules ke liye apne licensing office / official guide se confirm karo.</small></footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
